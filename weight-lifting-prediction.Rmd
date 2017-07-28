@@ -1,0 +1,190 @@
+## Reading Data
+
+# 1. Training and Testing Data is read from online source.
+```
+# Download and read raw data
+url1 <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url1, destfile="pml-training.csv")
+url2 <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url2, destfile="pml-testing.csv")
+dataTrain <- read.csv("pml-training.csv", header=TRUE)
+dataTest <- read.csv("pml-testing.csv", header=TRUE)
+```
+2. The dataTest set is held out. Exploration and subsequent analysis are only performed on the dataTrain set.
+3. After performing the command str(dataTrain), it is determined that there are 19622 observations, consisting of 160 variables.
+
+# Normalizing and Selecting Data
+1. It is noted that many variables in the dataset contain invalid values such as NA’s and blanks. For example the dataTrain$var_total_accel_belt variable below. It is decided that such variables with large amount of invalid values be excluded from the model.
+```
+summary(dataTrain$var_total_accel_belt)
+Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+  0.000   0.100   0.200   0.926   0.300  16.500   19216 
+```
+2. After excluding the abovementioned variables, it is found that the data has no more invalid values as described by complete.cases command. We now have 54 variables, including the variable to be predicted, classe.
+```
+dataTidy <- dataTrain[,-c(grep("^amplitude|^kurtosis|^skewness|^avg|^cvtd_timestamp|^max|^min|^new_window|^raw_timestamp|^stddev|^var|^user_name|X",names(dataTrain)))]
+
+paste("Complete Cases:")
+## [1] "Complete Cases:"
+table(complete.cases(dataTidy))
+## 
+##  TRUE 
+## 19622
+```
+# Data Splitting
+1. Given that we have a medium to large sample size, it is decided that the tidy data be further split into two sets, 60% for training and 40% for testing.
+```
+library(caret)
+## Loading required package: lattice
+## Loading required package: ggplot2
+set.seed(39)
+inTrain <- createDataPartition(y=dataTidy$classe,
+                               p=0.6,list=FALSE)
+dataTidyTrain <- dataTidy[inTrain,]
+dataTidyTest <- dataTidy[-inTrain,]
+```
+# Model Selection
+The RandomForest rf and Gradient Boosting gbm algorithms are selected for comparison based on the accuracy these algorithms can achieve in classification. 
+To reduce the risk of overfitting, a 10-fold cross validation is employed during model building. 
+```
+set.seed(39)
+# k-fold validation - 10-fold validation, use kappa as metric
+fitControl <- trainControl(method = "cv",
+                           number = 10)
+gbmFit <- train(classe~., data=dataTidyTrain, method="gbm", metric="Kappa", trControl=fitControl,verbose=FALSE)
+## Loading required package: gbm
+## Loading required package: survival
+## Loading required package: splines
+## 
+## Attaching package: 'survival'
+## 
+## The following object is masked from 'package:caret':
+## 
+##     cluster
+## 
+## Loading required package: parallel
+## Loaded gbm 2.1
+## Loading required package: plyr
+rfFit <- train(classe~.,data=dataTidyTrain,method="rf", metric="Kappa", trControl=fitControl)
+## Loading required package: randomForest
+## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.
+```
+Model Selection
+The models are then compared using the resamples function from the Caret package.
+Based on the plot below, it can be determined that the RandomForest algorithm fares better than the Gradient Boosting algorithm for this dataset, achieving a Kappa mean value of 0.996. It can also be seen that the RandomForest algorithm also displays less spread than Gradient Boosting.
+Therefore, the RandomForest model is selected for this dataset.
+```
+library(caret)
+## Loading required package: lattice
+## Loading required package: ggplot2
+library(lattice)
+rValues <- resamples(list(rf=rfFit,gbm=gbmFit))
+summary(rValues)
+Call:
+summary.resamples(object = rValues)
+
+Models: rf, gbm 
+Number of resamples: 10 
+
+Accuracy 
+      Min. 1st Qu. Median   Mean 3rd Qu.   Max. NA's
+rf  0.9949  0.9966 0.9970 0.9972  0.9975 1.0000    0
+gbm 0.9805  0.9851 0.9873 0.9868  0.9887 0.9915    0
+
+Kappa 
+      Min. 1st Qu. Median   Mean 3rd Qu.   Max. NA's
+rf  0.9936  0.9957 0.9962 0.9965  0.9968 1.0000    0
+gbm 0.9753  0.9812 0.9839 0.9832  0.9858 0.9893    0
+bwplot(rValues,metric="Kappa",main="RandomForest (rf) vs Gradient Boosting (gbm)")
+plot of chunk modelplot
+```
+# Model Validation
+1. With the selected RandomForest model, we shall proceed to model validation.
+2. The details of the selected model is shown below.
+```
+rfFit
+Random Forest 
+
+11776 samples
+   53 predictor
+    5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Cross-Validated (10 fold) 
+Summary of sample sizes: 10597, 10598, 10598, 10599, 10598, 10599, ... 
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa    
+   2    0.9926967  0.9907611
+  27    0.9971978  0.9964553
+  53    0.9926971  0.9907616
+
+Kappa was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 27. 
+```
+3. We shall be using the confusionMatrix function in the Caret package to validate the selected model with the dataTidyTest test set. The corresponding statistics and error rates are shown.
+```
+library(caret)
+Confusion Matrix and Statistics
+
+          Reference
+Prediction    A    B    C    D    E
+         A 2231    1    0    0    0
+         B    2 1515    1    0    0
+         C    0    4 1364    0    0
+         D    0    0    9 1269    8
+         E    0    0    0    4 1438
+
+Overall Statistics
+                                          
+               Accuracy : 0.9963          
+                 95% CI : (0.9947, 0.9975)
+    No Information Rate : 0.2846          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9953          
+ Mcnemar's Test P-Value : NA              
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            0.9991   0.9967   0.9927   0.9969   0.9945
+Specificity            0.9998   0.9995   0.9994   0.9974   0.9994
+Pos Pred Value         0.9996   0.9980   0.9971   0.9868   0.9972
+Neg Pred Value         0.9996   0.9992   0.9985   0.9994   0.9988
+Prevalence             0.2846   0.1937   0.1751   0.1622   0.1843
+Detection Rate         0.2843   0.1931   0.1738   0.1617   0.1833
+Detection Prevalence   0.2845   0.1935   0.1744   0.1639   0.1838
+Balanced Accuracy      0.9995   0.9981   0.9961   0.9971   0.9969
+```
+4. From the above validation result, it can be determined that the selected Model performs at a Kappa value of 0.9935, with an accuracy of 0.9963.
+
+# Final Model Testing
+1. Finally, we shall use the selected model to predict the classification of the testing set provided. In addition, in accordance to submission instructions, the pml_write_files function is used to generate submission files.
+```
+library(caret)
+results <- predict(rfFit,newdata=dataTest)
+print(as.data.frame(results))
+##    results
+## 1        B
+## 2        A
+## 3        B
+## 4        A
+## 5        A
+## 6        E
+## 7        D
+## 8        B
+## 9        A
+## 10       A
+## 11       B
+## 12       C
+## 13       B
+## 14       A
+## 15       E
+## 16       E
+## 17       A
+## 18       B
+## 19       B
+## 20       B
+```
